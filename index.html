@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline';">
+    <title>AH_INIT</title>
+</head>
+<body>
+<script>
+// Afterhours settings storage for Deadlock's in-game CitadelHTMLPanel.
+// Deadlock only lets SetURL open https:// pages, so the mod sends requests in
+// the URL fragment (never sent to the server) and reads replies from the title.
+// The page stores exactly one key; it cannot be used to read or write others.
+(function () {
+    'use strict';
+    if (window.top !== window.self) return;
+    var KEY = 'afterhours_settings_v1', CHUNK = 1000, LIMIT = 20000;
+    var lastId = '', outgoing = null;
+    function reply(msg) { document.title = 'AH_RES:' + JSON.stringify(msg); }
+    function part(id, index) {
+        var total = Math.max(1, Math.ceil(outgoing.length / CHUNK));
+        reply({ q: id, ok: true, d: outgoing.slice(index * CHUNK, (index + 1) * CHUNK), p: index, t: total });
+    }
+    var handlers = {
+        load: function (id) {
+            var value = localStorage.getItem(KEY);
+            if (value === null) { outgoing = null; reply({ q: id, ok: true, d: null, p: 0, t: 1 }); return; }
+            outgoing = value; part(id, 0);
+        },
+        next: function (id, msg) {
+            if (outgoing === null || !(msg.p >= 1) || msg.p * CHUNK >= outgoing.length) { reply({ q: id, ok: false, e: 'bad part' }); return; }
+            part(id, Math.floor(msg.p));
+        },
+        save: function (id, msg) {
+            if (typeof msg.v !== 'string' || msg.v.length > LIMIT) { reply({ q: id, ok: false, e: 'bad value' }); return; }
+            var parsed = JSON.parse(msg.v);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { reply({ q: id, ok: false, e: 'bad value' }); return; }
+            localStorage.setItem(KEY, msg.v);
+            reply({ q: id, ok: true });
+        }
+    };
+    function onFragment() {
+        var msg;
+        try { msg = JSON.parse(decodeURIComponent(location.hash.slice(1))); } catch (_) { return; }
+        if (!msg || typeof msg.q !== 'string' || !/^ah_\d+_\d+$/.test(msg.q) || msg.q === lastId) return;
+        if (!Object.prototype.hasOwnProperty.call(handlers, msg.f)) return;
+        lastId = msg.q;
+        try { handlers[msg.f](msg.q, msg); } catch (e) { reply({ q: msg.q, ok: false, e: String(e && e.message || e) }); }
+    }
+    try { localStorage.setItem('afterhours_probe', '1'); localStorage.removeItem('afterhours_probe'); }
+    catch (e) { document.title = 'AH_ERROR:' + String(e && e.message || e); return; }
+    // A fragment present at first load is ignored, so a reload never replays a request.
+    window.addEventListener('hashchange', onFragment);
+    document.title = 'AH_READY:1';
+})();
+</script>
+</body>
+</html>
